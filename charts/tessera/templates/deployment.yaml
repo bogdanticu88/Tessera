@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tessera.fullname" . }}
+  labels:
+    {{- include "tessera.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tessera.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "tessera.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "tessera.serviceAccountName" . }}
+      containers:
+        - name: tessera
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: OPENFGA_API_URL
+              value: {{ .Values.openfga.apiUrl | quote }}
+            - name: OPENFGA_STORE_ID
+              value: {{ .Values.openfga.storeId | quote }}
+            - name: OPENFGA_MODEL_ID
+              value: {{ .Values.openfga.modelId | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

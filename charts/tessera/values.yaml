@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: your-registry/your-tessera-service
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+openfga:
+  apiUrl: http://openfga:8080
+  storeId: ""
+  modelId: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+  name: ""

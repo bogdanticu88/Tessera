@@ -1,0 +1,45 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{0BA4F81B-4B85-4059-820D-37CE73110E13}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tessera.ControlPlane", "src\Tessera.ControlPlane\Tessera.ControlPlane.csproj", "{D9D71E15-B55D-4E96-8DB3-7826537FFE49}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{9D285986-27F0-490E-94BF-AADB3A4736B1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tessera.Sample", "samples\Tessera.Sample\Tessera.Sample.csproj", "{91D6171F-D6B0-4459-B7AF-2BA221CAF794}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{08EF228F-824A-4582-B48E-0548566521E2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tessera.ControlPlane.Tests", "tests\Tessera.ControlPlane.Tests\Tessera.ControlPlane.Tests.csproj", "{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D9D71E15-B55D-4E96-8DB3-7826537FFE49}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D9D71E15-B55D-4E96-8DB3-7826537FFE49}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D9D71E15-B55D-4E96-8DB3-7826537FFE49}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D9D71E15-B55D-4E96-8DB3-7826537FFE49}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91D6171F-D6B0-4459-B7AF-2BA221CAF794}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91D6171F-D6B0-4459-B7AF-2BA221CAF794}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91D6171F-D6B0-4459-B7AF-2BA221CAF794}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91D6171F-D6B0-4459-B7AF-2BA221CAF794}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D9D71E15-B55D-4E96-8DB3-7826537FFE49} = {0BA4F81B-4B85-4059-820D-37CE73110E13}
+		{91D6171F-D6B0-4459-B7AF-2BA221CAF794} = {9D285986-27F0-490E-94BF-AADB3A4736B1}
+		{0A56AD5D-F565-4AB1-8EC9-9EE6379F69E7} = {08EF228F-824A-4582-B48E-0548566521E2}
+	EndGlobalSection
+EndGlobal

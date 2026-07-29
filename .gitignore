@@ -1,0 +1,22 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+*.nupkg
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config / secrets - never commit real values
+appsettings.*.Local.json
+*.secrets.json
+.env
