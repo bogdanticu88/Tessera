@@ -160,13 +160,16 @@ Until this repo's own `dotnet restore` works from wherever you're building it, t
 
 ## HTTP surface
 
-`src/Tessera.Service` is a minimal API host that exposes onboard, kill, and restore over HTTP, so something other than an in-process .NET caller, NIA's `internal/policy`, for one, can drive Tessera. Three routes:
+`src/Tessera.Service` is a minimal API host that exposes onboard, kill, restore, and a read, over HTTP, so something other than an in-process .NET caller, NIA's `internal/policy`, for one, can drive Tessera. Four routes:
 
 - `POST /clients/onboard`, body `{ "client_ref", "business_unit", "grants": [{ "api_group" } | { "method", "path" }] }`
 - `POST /clients/{client_ref}/kill`, body `{ "incident" }`
 - `POST /clients/{client_ref}/restore`, no body
+- `GET /clients/{client_ref}`, returns current state, added for callers that need to read before they write, `onboard` is full-state reconcile with no incremental grant/revoke of its own, so a caller that wants to add or remove a single grant has to read the current set, change it, and onboard the merged result
 
-Every `/clients/*` route requires `Authorization: Bearer <token>`, an HS256 JWT with `iss`, `aud`, `exp`, and `sub` claims, `sub` becomes the operator identity attributed in the audit trail. The token's subject is never something a caller can override from the request body, so a caller can't claim to be a different operator than the token they presented says they are.
+All four share one response shape, `{ "outcome", "error_message", "client" }` for the read, or the equivalent result record for the others, on every status code they return, 200, 400, and 404 alike, not just on success. A 404 from the read carries that same body rather than an empty response, so a caller doesn't need two different ways to parse an error depending on which status code came back.
+
+Every `/clients/*` route requires `Authorization: Bearer <token>`, an HS256 JWT with `iss`, `aud`, `exp`, and `sub` claims, `sub` becomes the operator identity attributed in the audit trail. The token's subject is never something a caller can override from the request body, so a caller can't claim to be a different operator than the token they presented says they are. There is no per client_ref scoping on the token, a valid bearer for this service can read or act on any client_ref, that has been true of kill and restore since they shipped, the read endpoint just makes it cheaper to probe since it has no side effect and needs no incident id. Fine for a single operator-facing service, revisit if this ever grows tenants that should only see their own clients.
 
 Config is environment variables, listed in `.env.example`: `TESSERA_JWT_SIGNING_KEY` (base64, required, the service refuses to start without it), `TESSERA_JWT_ISSUER`, `TESSERA_JWT_AUDIENCE`, and, to point it at a real OpenFGA instance instead of the in-memory store, the same `OPENFGA_API_URL` and `OPENFGA_STORE_ID` used elsewhere in this file.
 

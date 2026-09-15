@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Tessera.ControlPlane;
 using Tessera.ControlPlane.OpenFga;
 using Tessera.Service.Auth;
@@ -107,10 +108,16 @@ builder.Services.AddSingleton(new Hs256JwtValidator(issuer, audience, signingKey
 // snake_case throughout, matching the OpenFGA adapter's own wire format
 // (OpenFgaAuthorizationStore) and the rest of this system's JSON, rather
 // than minimal APIs' default camelCase. Applies to both request binding
-// and response serialization.
+// and response serialization. Enums get the same treatment and are
+// written as strings, not numbers, System.Text.Json's default for an enum
+// is its underlying int, which is a wire contract that breaks the moment
+// someone reorders or inserts an enum member. GetClientOutcome is the
+// first enum on this surface, this converter is here so the next one gets
+// the same treatment without anyone having to remember to add it.
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
 });
 
 var app = builder.Build();
@@ -145,6 +152,24 @@ clients.MapPost("/{clientRef}/restore", async (string clientRef, HttpContext htt
 {
     var result = await ops.RestoreAsync(clientRef, RequireOperator(http), ct).ConfigureAwait(false);
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+});
+
+clients.MapGet("/{clientRef}", async (string clientRef, ClientOperations ops, CancellationToken ct) =>
+{
+    var result = await ops.GetAsync(clientRef, ct).ConfigureAwait(false);
+
+    // Same result record on every status code, 200, 400, and 404 alike,
+    // matching how onboard/kill/restore all return their own result DTO
+    // rather than a bespoke shape per status. A caller that deserializes
+    // error_message off any response from this service gets the same
+    // field name everywhere, and a 404 carries a body instead of being the
+    // one status code on this whole surface that silently doesn't.
+    return result.Outcome switch
+    {
+        GetClientOutcome.Found => Results.Ok(result),
+        GetClientOutcome.NotFound => Results.NotFound(result),
+        _ => Results.BadRequest(result),
+    };
 });
 
 app.Run();

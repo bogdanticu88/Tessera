@@ -346,6 +346,44 @@ await Run("Ops_Restore_ClearsKillSentinel", async () =>
     Check(record is { Killed: false }, "expected the kill sentinel cleared after restore");
 });
 
+await Run("Ops_Get_ReturnsOnboardedClientState", async () =>
+{
+    var (ops, _) = MakeOperations();
+    await ops.OnboardAsync(new OnboardRequest("Billing-Reconciler", "finance", new[] { new GrantDto("orders", null, null) }), default);
+
+    var result = await ops.GetAsync("Billing-Reconciler", default);
+    Check(result.Outcome == GetClientOutcome.Found, $"expected Found, got {result.Outcome}");
+    Check(result.Client!.ClientRef == "billing-reconciler", $"expected canonicalized ref, got {result.Client.ClientRef}");
+    Check(result.Client.Grants.Count == 1, "expected the onboarded grant to come back");
+    Check(!result.Client.Killed, "freshly onboarded client should not be killed");
+});
+
+await Run("Ops_Get_ReflectsKillState", async () =>
+{
+    var (ops, _) = MakeOperations();
+    await ops.OnboardAsync(new OnboardRequest("a", null, new[] { new GrantDto("g", null, null) }), default);
+    await ops.KillAsync("a", "INC-1", "op-1", default);
+
+    var result = await ops.GetAsync("a", default);
+    Check(result.Outcome == GetClientOutcome.Found, "a killed client is still found, killed is a state on it, not a deletion");
+    Check(result.Client!.Killed, "expected the kill to show up in the read");
+});
+
+await Run("Ops_Get_UnknownClientRef_ReturnsNotFound", async () =>
+{
+    var (ops, _) = MakeOperations();
+    var result = await ops.GetAsync("never-onboarded", default);
+    Check(result.Outcome == GetClientOutcome.NotFound, $"expected NotFound for a ref that was never onboarded, got {result.Outcome}");
+});
+
+await Run("Ops_Get_InvalidClientRef_ReturnsInvalidClientRefNotNotFound", async () =>
+{
+    var (ops, _) = MakeOperations();
+    var result = await ops.GetAsync("has a space", default);
+    Check(result.Outcome == GetClientOutcome.InvalidClientRef, $"a malformed ref is a 400, not a 404, got {result.Outcome}");
+    Check(!string.IsNullOrEmpty(result.ErrorMessage), "expected an error message explaining the invalid ref");
+});
+
 // ============================================================
 // Live HTTP smoke test against the real running service
 // ============================================================
@@ -400,6 +438,33 @@ await Run("LiveService_OnboardKillRestoreOverRealHttp", async () =>
         var onboardBody = await onboardResp.Content.ReadAsStringAsync();
         Check(onboardResp.StatusCode == HttpStatusCode.OK, $"expected 200 from onboard, got {onboardResp.StatusCode}: {onboardBody}");
         Check(onboardBody.Contains("smoke-client"), "expected the onboarded client_ref in the response");
+
+        // get, over real HTTP, authenticated
+        var getResp = await http.GetAsync("clients/smoke-client");
+        var getBody = await getResp.Content.ReadAsStringAsync();
+        Check(getResp.StatusCode == HttpStatusCode.OK, $"expected 200 from get, got {getResp.StatusCode}: {getBody}");
+        Check(getBody.Contains("smoke-client"), "expected the client_ref in the get response");
+        Check(getBody.Contains("smoke-group"), "expected the onboarded grant to round-trip through get");
+
+        // get, unauthenticated, rejected same as the mutating routes
+        using (var noAuthClient = new HttpClient { BaseAddress = http.BaseAddress })
+        {
+            var unauthGet = await noAuthClient.GetAsync("clients/smoke-client");
+            Check(unauthGet.StatusCode == HttpStatusCode.Unauthorized, $"expected 401 for get without a token, got {unauthGet.StatusCode}");
+        }
+
+        // get, unknown client_ref, 404 not 400, with a body, same result
+        // shape as every other status code on this route
+        var missingResp = await http.GetAsync("clients/never-onboarded");
+        var missingBody = await missingResp.Content.ReadAsStringAsync();
+        Check(missingResp.StatusCode == HttpStatusCode.NotFound, $"expected 404 for a client_ref that was never onboarded, got {missingResp.StatusCode}");
+        Check(missingBody.Contains("\"outcome\":\"not_found\""), $"expected a JSON body on the 404, not an empty response, got: {missingBody}");
+
+        // get, invalid client_ref, 400 with the same result shape, error_message set
+        var invalidRefResp = await http.GetAsync("clients/has%20a%20space");
+        var invalidRefBody = await invalidRefResp.Content.ReadAsStringAsync();
+        Check(invalidRefResp.StatusCode == HttpStatusCode.BadRequest, $"expected 400 for an invalid client_ref, got {invalidRefResp.StatusCode}: {invalidRefBody}");
+        Check(invalidRefBody.Contains("error_message"), $"expected error_message in the 400 body, got: {invalidRefBody}");
 
         // kill without incident rejected
         var killNoIncident = await http.PostAsJsonAsync("clients/smoke-client/kill", new { });

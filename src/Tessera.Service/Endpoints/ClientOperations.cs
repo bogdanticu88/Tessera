@@ -31,6 +31,20 @@ public sealed record RestoreResultDto(bool Success, string? ErrorMessage, string
     public static RestoreResultDto Failure(string message) => new(false, message, null);
 }
 
+public enum GetClientOutcome { Found, NotFound, InvalidClientRef }
+
+// A separate outcome enum rather than reusing the Success/ErrorMessage shape
+// the other results use, because a GET has three distinct outcomes that a
+// caller needs to tell apart to pick the right status code: a bad ref is a
+// 400, a ref that canonicalizes fine but was never onboarded is a 404, and
+// those are not the same thing.
+public sealed record GetClientResult(GetClientOutcome Outcome, string? ErrorMessage, ClientStateDto? Client)
+{
+    public static GetClientResult Ok(ClientStateDto client) => new(GetClientOutcome.Found, null, client);
+    public static GetClientResult NotFound() => new(GetClientOutcome.NotFound, null, null);
+    public static GetClientResult InvalidRef(string message) => new(GetClientOutcome.InvalidClientRef, message, null);
+}
+
 /// <summary>
 /// The actual onboard/kill/restore logic, as plain methods with no
 /// dependency on ASP.NET's hosting model. Program.cs's minimal API
@@ -135,6 +149,35 @@ public sealed class ClientOperations(ClientProvisioner provisioner, KillSwitchSe
 
         await killSwitch.RestoreAsync(clientRef, operatorId, ct).ConfigureAwait(false);
         return RestoreResultDto.Ok(clientRef);
+    }
+
+    // Read-only, added for callers like NIA's policy.Client that need to see
+    // current state before deciding what to write, there was no way to read
+    // a client back over HTTP before this, only onboard/kill/restore.
+    //
+    // Same trust model as kill and restore: any caller holding a valid
+    // bearer JWT for this service can look up any client_ref, there is no
+    // per-client_ref scoping on the token. That was already true for the
+    // side effecting routes, this just makes it available without an
+    // incident id and without a side effect, so it is a cheaper way to
+    // probe which client_refs exist. Worth revisiting if this service ever
+    // grows multi-tenant callers that should only see their own clients,
+    // but for a single operator-facing service it's the same boundary the
+    // rest of this surface already draws.
+    public async Task<GetClientResult> GetAsync(string clientRefRaw, CancellationToken ct)
+    {
+        string clientRef;
+        try
+        {
+            clientRef = CanonicalForm.ClientRef(clientRefRaw);
+        }
+        catch (ArgumentException ex)
+        {
+            return GetClientResult.InvalidRef(ex.Message);
+        }
+
+        var stored = await registry.GetAsync(clientRef, ct).ConfigureAwait(false);
+        return stored is null ? GetClientResult.NotFound() : GetClientResult.Ok(ToDto(stored));
     }
 
     private static ClientStateDto ToDto(ClientRecord record) => new(
