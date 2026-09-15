@@ -125,7 +125,7 @@ Tessera is adopted by implementing a small set of interfaces and providing confi
 | Interface | You provide | Reference implementation included |
 |-----------|-------------|------------------------------------|
 | `IIdentityResolver` | how a request maps to a client reference and assurance | claim or header resolver |
-| `IAuthorizationStore` | the OpenFGA binding (or a stand-in) | in-memory store |
+| `IAuthorizationStore` | the OpenFGA binding (or a stand-in) | in-memory store, or `OpenFgaAuthorizationStore` for a real OpenFGA instance (see below) |
 | `IClientRegistry` | durable client and kill-sentinel storage | in-memory registry |
 | `IAuditSink` | where audit events go | console sink |
 | `IClientLock` | per client reference mutual exclusion | in-process lock |
@@ -148,10 +148,20 @@ Two behaviors that the in-memory store does not hide, because real OpenFGA does 
 - Reads are paged; loop on the continuation token.
 - Writes and deletes are capped per request (about 100 tuples); chunk large batches.
 
+`OpenFgaAuthorizationStore` (`src/Tessera.ControlPlane/OpenFga/`) is that adapter. It talks to OpenFGA's plain REST API over `HttpClient` rather than the official SDK, on purpose, it's four endpoints, small enough to read end to end and know exactly what it does rather than depend on a package for. Point an `HttpClient` at your FGA API URL (trailing slash required, the constructor checks and throws otherwise, a missing slash silently drops the last path segment under `HttpClient`'s URI rules) and pass it a store id.
+
+A few things worth knowing before you point it at production traffic:
+
+- A chunked write or delete that fails partway throws `OpenFgaPartialBatchException`, which tells you how many tuples from earlier chunks already committed. Nothing gets rolled back, OpenFGA doesn't support that, so treat the succeeded count as real.
+- Read pagination is capped at 10,000 pages. That's not a real limit for normal use, it's a guard against a server that never empties its continuation token, since `ReadTuplesForClientAsync` runs inside `KillSwitchService`'s read-delete loop while the per-client lock is held. A hang there stalls the kill switch, not just one check.
+- Network failures (`HttpRequestException`) and cancellation (`OperationCanceledException`) propagate as themselves, not wrapped. Only actual OpenFGA API errors become `OpenFgaApiException`.
+
+Until this repo's own `dotnet restore` works from wherever you're building it, the tests for this adapter live in `tools/AdapterHarness` as a plain console app rather than in the xunit suite, see that folder's README for why and for the plan to fold them back in.
+
 ## Roadmap
 
 ### v1.1
-- OpenFGA SDK adapter for `IAuthorizationStore` with paging and chunking
+- ~~OpenFGA adapter for `IAuthorizationStore` with paging and chunking~~ done, see above (REST-based rather than the official SDK)
 - PostgreSQL registry implementation with a database advisory lock
 - Leader election for the reconcile loop
 
