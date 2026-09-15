@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Tessera.ControlPlane;
 
@@ -110,9 +111,19 @@ public sealed class InProcessClientLock : IClientLock
 /// <summary>Development audit sink. Swap for your SIEM in production.</summary>
 public sealed class ConsoleAuditSink : IAuditSink
 {
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
+
     public Task AppendAsync(AuditEvent evt, CancellationToken ct = default)
     {
-        Console.WriteLine($"[audit] {evt.At:O} {evt.Action} client={evt.ClientRef} by={evt.Operator} incident={evt.Incident ?? "-"}");
+        // Serialized as JSON, not string-interpolated. Operator now
+        // routinely comes from a caller-supplied JWT subject claim
+        // (Tessera.Service's HTTP surface), only the token's signature is
+        // verified, the claim's string content is the caller's choice, so
+        // Operator and Incident can't be trusted to be newline-free.
+        // Interpolating them into a plain log line would let a valid
+        // token holder forge or split audit entries; JSON's string
+        // escaping is what stops that.
+        Console.WriteLine("[audit] " + JsonSerializer.Serialize(evt, Options));
         return Task.CompletedTask;
     }
 }

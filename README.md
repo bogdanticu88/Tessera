@@ -158,6 +158,22 @@ A few things worth knowing before you point it at production traffic:
 
 Until this repo's own `dotnet restore` works from wherever you're building it, the tests for this adapter live in `tools/AdapterHarness` as a plain console app rather than in the xunit suite, see that folder's README for why and for the plan to fold them back in.
 
+## HTTP surface
+
+`src/Tessera.Service` is a minimal API host that exposes onboard, kill, and restore over HTTP, so something other than an in-process .NET caller, NIA's `internal/policy`, for one, can drive Tessera. Three routes:
+
+- `POST /clients/onboard`, body `{ "client_ref", "business_unit", "grants": [{ "api_group" } | { "method", "path" }] }`
+- `POST /clients/{client_ref}/kill`, body `{ "incident" }`
+- `POST /clients/{client_ref}/restore`, no body
+
+Every `/clients/*` route requires `Authorization: Bearer <token>`, an HS256 JWT with `iss`, `aud`, `exp`, and `sub` claims, `sub` becomes the operator identity attributed in the audit trail. The token's subject is never something a caller can override from the request body, so a caller can't claim to be a different operator than the token they presented says they are.
+
+Config is environment variables, listed in `.env.example`: `TESSERA_JWT_SIGNING_KEY` (base64, required, the service refuses to start without it), `TESSERA_JWT_ISSUER`, `TESSERA_JWT_AUDIENCE`, and, to point it at a real OpenFGA instance instead of the in-memory store, the same `OPENFGA_API_URL` and `OPENFGA_STORE_ID` used elsewhere in this file.
+
+The JWT validation is hand-rolled (`src/Tessera.Service/Auth/Hs256JwtValidator.cs`), HS256 only, using nothing beyond `System.Security.Cryptography` and `System.Text.Json`. That's a deliberate limit, not an oversight: RS256 and JWKS-based OIDC are real complexity with real ways to get subtly wrong, and belong to a maintained library (`Microsoft.AspNetCore.Authentication.JwtBearer`) once this repo can restore NuGet packages again. HS256 with one shared secret is small enough to fully own and verify directly. Don't extend it to other algorithms without the same scrutiny.
+
+Tests for both the OpenFGA adapter and this service live in `tools/` as plain console apps for the same NuGet-availability reason described above, see each tool's own README.
+
 ## Roadmap
 
 ### v1.1
@@ -166,7 +182,7 @@ Until this repo's own `dotnet restore` works from wherever you're building it, t
 - Leader election for the reconcile loop
 
 ### v1.2
-- Minimal HTTP surface (kill, restore, onboard) with issuer and audience validation
+- ~~Minimal HTTP surface (kill, restore, onboard) with issuer and audience validation~~ done, see above
 - Reference SIEM audit sink
 - GitOps reconciler worker and drift detection
 
