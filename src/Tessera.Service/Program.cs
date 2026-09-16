@@ -88,12 +88,26 @@ if (!string.IsNullOrWhiteSpace(openFgaUrl))
     var authorizationModelId = Environment.GetEnvironmentVariable("OPENFGA_MODEL_ID");
     var apiToken = Environment.GetEnvironmentVariable("OPENFGA_API_TOKEN");
 
+    // AddTypedClient's TClient is inferred from the factory delegate's return
+    // type, not from the AddHttpClient<TClient, TImplementation> call above
+    // it. Leaving it inferred makes it bind the factory to the concrete
+    // OpenFgaAuthorizationStore type, not to IAuthorizationStore, so a
+    // request for IAuthorizationStore falls back to AddHttpClient's own
+    // default factory, which uses ActivatorUtilities to construct
+    // OpenFgaAuthorizationStore and can't resolve its plain `string storeId`
+    // constructor parameter from the container. That throws
+    // InvalidOperationException: Unable to resolve service for type
+    // 'System.String' the first time something actually asks for
+    // IAuthorizationStore, only reachable by pointing this service at a real
+    // OpenFGA instance, which is why it slipped past every check so far. The
+    // explicit <IAuthorizationStore> below is what makes this factory the
+    // one that answers for the interface.
     builder.Services.AddHttpClient<IAuthorizationStore, OpenFgaAuthorizationStore>((sp, http) =>
     {
         http.BaseAddress = new Uri(baseUrl);
         if (!string.IsNullOrWhiteSpace(apiToken))
             http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
-    }).AddTypedClient((http, sp) => new OpenFgaAuthorizationStore(http, openFgaStoreId!, authorizationModelId));
+    }).AddTypedClient<IAuthorizationStore>((http, sp) => new OpenFgaAuthorizationStore(http, openFgaStoreId!, authorizationModelId));
 }
 else
 {
