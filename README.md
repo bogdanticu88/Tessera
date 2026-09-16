@@ -125,7 +125,7 @@ Tessera is adopted by implementing a small set of interfaces and providing confi
 | Interface | You provide | Reference implementation included |
 |-----------|-------------|------------------------------------|
 | `IIdentityResolver` | how a request maps to a client reference and assurance | claim or header resolver |
-| `IAuthorizationStore` | the OpenFGA binding (or a stand-in) | in-memory store |
+| `IAuthorizationStore` | the OpenFGA binding (or a stand-in) | in-memory store, or `OpenFgaAuthorizationStore` for a real OpenFGA instance (see below) |
 | `IClientRegistry` | durable client and kill-sentinel storage | in-memory registry |
 | `IAuditSink` | where audit events go | console sink |
 | `IClientLock` | per client reference mutual exclusion | in-process lock |
@@ -148,15 +148,44 @@ Two behaviors that the in-memory store does not hide, because real OpenFGA does 
 - Reads are paged; loop on the continuation token.
 - Writes and deletes are capped per request (about 100 tuples); chunk large batches.
 
+`OpenFgaAuthorizationStore` (`src/Tessera.ControlPlane/OpenFga/`) is that adapter. It talks to OpenFGA's plain REST API over `HttpClient` rather than the official SDK, on purpose, it's four endpoints, small enough to read end to end and know exactly what it does rather than depend on a package for. Point an `HttpClient` at your FGA API URL (trailing slash required, the constructor checks and throws otherwise, a missing slash silently drops the last path segment under `HttpClient`'s URI rules) and pass it a store id.
+
+A few things worth knowing before you point it at production traffic:
+
+- A chunked write or delete that fails partway throws `OpenFgaPartialBatchException`, which tells you how many tuples from earlier chunks already committed. Nothing gets rolled back, OpenFGA doesn't support that, so treat the succeeded count as real.
+- Read pagination is capped at 10,000 pages. That's not a real limit for normal use, it's a guard against a server that never empties its continuation token, since `ReadTuplesForClientAsync` runs inside `KillSwitchService`'s read-delete loop while the per-client lock is held. A hang there stalls the kill switch, not just one check.
+- Network failures (`HttpRequestException`) and cancellation (`OperationCanceledException`) propagate as themselves, not wrapped. Only actual OpenFGA API errors become `OpenFgaApiException`.
+
+Until this repo's own `dotnet restore` works from wherever you're building it, the tests for this adapter live in `tools/AdapterHarness` as a plain console app rather than in the xunit suite, see that folder's README for why and for the plan to fold them back in.
+
+## HTTP surface
+
+`src/Tessera.Service` is a minimal API host that exposes onboard, kill, restore, and a read, over HTTP, so something other than an in-process .NET caller, NIA's `internal/policy`, for one, can drive Tessera. Four routes:
+
+- `POST /clients/onboard`, body `{ "client_ref", "business_unit", "grants": [{ "api_group" } | { "method", "path" }] }`
+- `POST /clients/{client_ref}/kill`, body `{ "incident" }`
+- `POST /clients/{client_ref}/restore`, no body
+- `GET /clients/{client_ref}`, returns current state, added for callers that need to read before they write, `onboard` is full-state reconcile with no incremental grant/revoke of its own, so a caller that wants to add or remove a single grant has to read the current set, change it, and onboard the merged result
+
+All four share one response shape, `{ "outcome", "error_message", "client" }` for the read, or the equivalent result record for the others, on every status code they return, 200, 400, and 404 alike, not just on success. A 404 from the read carries that same body rather than an empty response, so a caller doesn't need two different ways to parse an error depending on which status code came back.
+
+Every `/clients/*` route requires `Authorization: Bearer <token>`, an HS256 JWT with `iss`, `aud`, `exp`, and `sub` claims, `sub` becomes the operator identity attributed in the audit trail. The token's subject is never something a caller can override from the request body, so a caller can't claim to be a different operator than the token they presented says they are. There is no per client_ref scoping on the token, a valid bearer for this service can read or act on any client_ref, that has been true of kill and restore since they shipped, the read endpoint just makes it cheaper to probe since it has no side effect and needs no incident id. Fine for a single operator-facing service, revisit if this ever grows tenants that should only see their own clients.
+
+Config is environment variables, listed in `.env.example`: `TESSERA_JWT_SIGNING_KEY` (base64, required, the service refuses to start without it), `TESSERA_JWT_ISSUER`, `TESSERA_JWT_AUDIENCE`, and, to point it at a real OpenFGA instance instead of the in-memory store, the same `OPENFGA_API_URL` and `OPENFGA_STORE_ID` used elsewhere in this file.
+
+The JWT validation is hand-rolled (`src/Tessera.Service/Auth/Hs256JwtValidator.cs`), HS256 only, using nothing beyond `System.Security.Cryptography` and `System.Text.Json`. That's a deliberate limit, not an oversight: RS256 and JWKS-based OIDC are real complexity with real ways to get subtly wrong, and belong to a maintained library (`Microsoft.AspNetCore.Authentication.JwtBearer`) once this repo can restore NuGet packages again. HS256 with one shared secret is small enough to fully own and verify directly. Don't extend it to other algorithms without the same scrutiny.
+
+Tests for both the OpenFGA adapter and this service live in `tools/` as plain console apps for the same NuGet-availability reason described above, see each tool's own README.
+
 ## Roadmap
 
 ### v1.1
-- OpenFGA SDK adapter for `IAuthorizationStore` with paging and chunking
+- ~~OpenFGA adapter for `IAuthorizationStore` with paging and chunking~~ done, see above (REST-based rather than the official SDK)
 - PostgreSQL registry implementation with a database advisory lock
 - Leader election for the reconcile loop
 
 ### v1.2
-- Minimal HTTP surface (kill, restore, onboard) with issuer and audience validation
+- ~~Minimal HTTP surface (kill, restore, onboard) with issuer and audience validation~~ done, see above
 - Reference SIEM audit sink
 - GitOps reconciler worker and drift detection
 
