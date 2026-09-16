@@ -2,14 +2,20 @@
 # restore, get). Multi-stage: the SDK image only exists to publish, the
 # shipped image is the ASP.NET runtime plus the published output.
 #
-# Same caveat as NIA's Dockerfiles: dotnet build/test have run clean
-# against this code (see tools/ServiceHarness), including a live process
-# spawned directly, but this Dockerfile itself has not been through an
-# actual "docker build", this sandbox has no Docker daemon and NuGet
-# restore is blocked here too (see README, "OpenFGA adapter" section, and
-# each tools/*/README.md), all of which is exactly why the workaround of
-# building outside Docker first existed in the first place. Confirm this
-# builds before relying on it.
+# This has been through an actual `docker build` and run, on a machine
+# with both Docker and working NuGet access, neither of which this
+# sandbox has (see README, "OpenFGA adapter" section, and each
+# tools/*/README.md, for why the workaround of building outside Docker
+# first existed here in the first place). The resulting container came
+# up healthy, onboarded a client against a real OpenFGA instance, and
+# handled a kill against it, real tuples written and deleted, not the
+# in-memory store. That run is what caught the two bugs fixed in this
+# file's own history, right after this Dockerfile was added: an
+# IAuthorizationStore dependency injection mistake, and
+# ReadTuplesForClientAsync filtering OpenFGA's read endpoint by user
+# alone, which OpenFGA rejects. See NIA's docs/ARCHITECTURE.md for the
+# full account, that repo's compose stack is what actually exercised
+# this image.
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY . .
