@@ -122,25 +122,33 @@ await Run("Check_ReturnsFalseWhenDenied", async () =>
 
 await Run("Read_LoopsAcrossPagesUntilContinuationTokenIsEmpty", async () =>
 {
-    var handler = new FakeHandler((_, body, callNumber) =>
+    // Reads now go out once per known object type (api_group, then
+    // api_endpoint, see KnownObjectTypes), each paginated on its own, so
+    // branch on which type a given request is filtering by rather than
+    // assuming one continuous page sequence.
+    var handler = new FakeHandler((_, body, _) =>
     {
-        if (callNumber == 1)
+        if (body.Contains("\"object\":\"api_group:\""))
         {
-            Check(!body.Contains("continuation_token"), "the first page request should not carry a continuation token");
+            if (!body.Contains("tok1"))
+            {
+                Check(!body.Contains("continuation_token"), "the first api_group page request should not carry a continuation token");
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK,
+                    "{\"tuples\":[{\"key\":{\"user\":\"client:a\",\"relation\":\"member\",\"object\":\"api_group:g1\"},\"timestamp\":\"2024-01-01T00:00:00Z\"}],\"continuation_token\":\"tok1\"}"));
+            }
             return Task.FromResult(JsonResponse(HttpStatusCode.OK,
-                "{\"tuples\":[{\"key\":{\"user\":\"client:a\",\"relation\":\"member\",\"object\":\"api_group:g1\"},\"timestamp\":\"2024-01-01T00:00:00Z\"}],\"continuation_token\":\"tok1\"}"));
+                "{\"tuples\":[{\"key\":{\"user\":\"client:a\",\"relation\":\"member\",\"object\":\"api_group:g2\"},\"timestamp\":\"2024-01-01T00:00:00Z\"}],\"continuation_token\":\"\"}"));
         }
 
-        Check(body.Contains("tok1"), "the second page request should carry the token returned by the first");
-        return Task.FromResult(JsonResponse(HttpStatusCode.OK,
-            "{\"tuples\":[{\"key\":{\"user\":\"client:a\",\"relation\":\"member\",\"object\":\"api_group:g2\"},\"timestamp\":\"2024-01-01T00:00:00Z\"}],\"continuation_token\":\"\"}"));
+        Check(body.Contains("\"object\":\"api_endpoint:\""), $"expected a read filtered by api_group: or api_endpoint:, got {body}");
+        return Task.FromResult(JsonResponse(HttpStatusCode.OK, "{\"tuples\":[],\"continuation_token\":\"\"}"));
     });
     var store = new OpenFgaAuthorizationStore(MakeClient(handler), "store1");
 
     var result = await store.ReadTuplesForClientAsync("a");
 
-    Check(handler.Requests.Count == 2, $"expected 2 requests, one per page, got {handler.Requests.Count}");
-    Check(result.Count == 2, $"expected tuples from both pages, got {result.Count}");
+    Check(handler.Requests.Count == 3, $"expected 3 requests, 2 pages for api_group plus 1 for api_endpoint, got {handler.Requests.Count}");
+    Check(result.Count == 2, $"expected tuples from both api_group pages, got {result.Count}");
 });
 
 await Run("Read_FiltersByCanonicalClientUser", async () =>
@@ -150,8 +158,29 @@ await Run("Read_FiltersByCanonicalClientUser", async () =>
 
     await store.ReadTuplesForClientAsync("billing-reconciler");
 
-    Check(handler.Requests[0].Body.Contains("\"user\":\"client:billing-reconciler\""),
-        "expected the read filter to use the canonical client: prefix, matching InMemoryAuthorizationStore's convention");
+    Check(handler.Requests.Count == 2, $"expected one read per known object type, got {handler.Requests.Count}");
+    foreach (var req in handler.Requests)
+        Check(req.Body.Contains("\"user\":\"client:billing-reconciler\""),
+            "expected the read filter to use the canonical client: prefix, matching InMemoryAuthorizationStore's convention");
+});
+
+await Run("Read_FiltersByObjectType_BecauseOpenFgaRejectsAUserOnlyFilter", async () =>
+{
+    // Regression test for a real bug: OpenFGA's /read endpoint returns a
+    // 400 ("the object type field is required") for a tuple_key that
+    // only sets user. Found by running this adapter against a live
+    // OpenFGA instance, not by any test, hence this test now.
+    var handler = new FakeHandler((_, _, _) => Task.FromResult(JsonResponse(HttpStatusCode.OK, "{\"tuples\":[]}")));
+    var store = new OpenFgaAuthorizationStore(MakeClient(handler), "store1");
+
+    await store.ReadTuplesForClientAsync("a");
+
+    Check(handler.Requests.Any(r => r.Body.Contains("\"object\":\"api_group:\"")),
+        "expected a read filtered to api_group: objects");
+    Check(handler.Requests.Any(r => r.Body.Contains("\"object\":\"api_endpoint:\"")),
+        "expected a read filtered to api_endpoint: objects");
+    Check(handler.Requests.All(r => !r.Body.Contains("\"user\":\"client:a\"}")),
+        "every read should carry an object filter alongside the user filter, not user alone");
 });
 
 // --- error handling ---

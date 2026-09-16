@@ -112,10 +112,29 @@ public sealed class OpenFgaAuthorizationStore : IAuthorizationStore
         }
     }
 
+    // The two object types Tessera ever writes a tuple against, see
+    // GrantTupleMapper. OpenFGA's /read endpoint rejects a tuple_key
+    // filtered by user alone, "the object type field is required", it has
+    // no query shape for "everything this user touches regardless of
+    // type". So a client's full tuple set has to be read one object type
+    // at a time and merged, using the type-only object filter ("type:",
+    // empty id, documented as "any object of this type") alongside the
+    // user filter.
+    private static readonly string[] KnownObjectTypes = { "api_group", "api_endpoint" };
+
     public async Task<IReadOnlyList<RelationTuple>> ReadTuplesForClientAsync(string clientRef, CancellationToken ct = default)
     {
         var user = $"client:{clientRef}";
         var results = new List<RelationTuple>();
+
+        foreach (var objectType in KnownObjectTypes)
+            await ReadTuplesForClientAndTypeAsync(user, objectType, results, ct).ConfigureAwait(false);
+
+        return results;
+    }
+
+    private async Task ReadTuplesForClientAndTypeAsync(string user, string objectType, List<RelationTuple> results, CancellationToken ct)
+    {
         string? continuationToken = null;
         var page = 0;
 
@@ -124,11 +143,11 @@ public sealed class OpenFgaAuthorizationStore : IAuthorizationStore
             page++;
             if (page > MaxReadPages)
                 throw new InvalidOperationException(
-                    $"OpenFGA read for client {clientRef} did not terminate within {MaxReadPages} pages. " +
+                    $"OpenFGA read for user {user}, object type {objectType} did not terminate within {MaxReadPages} pages. " +
                     "Aborting rather than looping or growing memory without bound; this usually means a " +
                     "server that isn't emptying its continuation token, not a client with a legitimately huge tuple set.");
 
-            var body = new ReadRequest(new OpenFgaTupleKeyFilter(user, null, null), DefaultReadPageSize, continuationToken);
+            var body = new ReadRequest(new OpenFgaTupleKeyFilter(user, null, $"{objectType}:"), DefaultReadPageSize, continuationToken);
             var response = await SendAsync<ReadRequest, ReadResponse>(HttpMethod.Post, $"stores/{_storeId}/read", body, ct).ConfigureAwait(false);
 
             foreach (var entry in response.Tuples)
@@ -136,8 +155,6 @@ public sealed class OpenFgaAuthorizationStore : IAuthorizationStore
 
             continuationToken = string.IsNullOrEmpty(response.ContinuationToken) ? null : response.ContinuationToken;
         } while (continuationToken is not null);
-
-        return results;
     }
 
     public async Task<bool> CheckAsync(string user, string relation, string @object, CancellationToken ct = default)
